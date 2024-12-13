@@ -1,0 +1,441 @@
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+# Load the dataset
+data = pd.read_csv('balanced_mushroom_dataset.csv')
+
+# Display the first few rows of the dataset to understand its structure
+data.head()
+# Perform basic exploration
+eda_summary = {
+    "Shape": data.shape,
+    "Data Types": data.dtypes,
+    "Missing Values": data.isna().sum(),
+    "Unique Values": data.nunique(),
+    "Basic Statistics": data.describe(),
+}
+
+print("EDA Summary", eda_summary)
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Univariate analysis for numerical variables
+numerical_columns = data.select_dtypes(include=['int64', 'float64']).columns.tolist()
+
+print("Univariate Analysis for Numerical Variables:")
+for column in numerical_columns:
+    plt.figure(figsize=(10, 5))
+    sns.histplot(data=data, x=column, kde=True, color="blue")
+    plt.title(f"Distribution of {column}")
+    plt.show()
+import numpy as np
+#find the columns with Numrical data
+num_columns = data.select_dtypes(include=[np.number]).columns.tolist()
+# Print the columns
+print("Numerical Columns:", num_columns)
+for var in num_columns:
+    data.boxplot(column = var, figsize=(10,10))
+    plt.show()
+#Plotting each numeric predictor against the other
+sns.pairplot(data)
+#Checking the highly correlated variables
+corr_values = data.corr().unstack().reset_index()
+print(corr_values.shape)
+corr_values2 = corr_values[corr_values['level_0'] > corr_values['level_1'] ]
+print(corr_values2.shape)
+corr_values2.columns = ['var1', 'var2', 'corr_value']
+corr_values2['corr_abs'] = corr_values2['corr_value'].abs()
+corr_values2.sort_values( 'corr_abs', ascending=False, inplace=True)
+corr_values2.head(10)
+#creating a heat map to see the degree of correlation visually
+plt.figure(figsize=(10, 8) )
+correlation_matrix = data.corr().abs()
+sns.heatmap(correlation_matrix, xticklabels = correlation_matrix.columns.values,yticklabels = correlation_matrix.columns.values, annot = True)
+
+# Print the correlation matrix
+print(correlation_matrix)
+# Plot scatter plots for highly correlated features
+plt.figure(figsize=(12, 6))
+
+# Scatter plot for stem-width vs cap-diameter
+plt.subplot(1, 2, 1)
+plt.scatter(data['cap-diameter'], data['stem-width'], alpha=0.6, color='#FFA500')
+plt.title('Stem Width vs Cap Diameter')
+plt.xlabel('Cap Diameter')
+plt.ylabel('Stem Width')
+
+# Scatter plot for other correlated features if any
+plt.subplot(1, 2, 2)
+plt.scatter(data['stem-height'], data['stem-width'], alpha=0.6, color='#FFA500')
+plt.title('Stem Height vs Stem Width')
+plt.xlabel('Stem Height')
+plt.ylabel('Stem Width')
+
+plt.tight_layout()
+plt.show()
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+# Standardize the data (excluding the target variable 'class')
+features = data.drop('class', axis=1)
+scaler = StandardScaler()
+features_scaled = scaler.fit_transform(features)
+
+# Apply PCA
+pca = PCA()
+pca.fit(features_scaled)
+explained_variance = np.cumsum(pca.explained_variance_ratio_)
+
+# Plot the explained variance to find the optimal number of components
+plt.figure(figsize=(8, 5))
+plt.plot(range(1, len(explained_variance) + 1), explained_variance, marker='o')
+plt.title('Explained Variance by Number of Principal Components')
+plt.xlabel('Number of Principal Components')
+plt.ylabel('Cumulative Explained Variance')
+plt.axhline(y=0.96, color='r', linestyle='--', label='96% Variance Threshold')
+plt.legend()
+plt.grid()
+plt.show()
+
+# Identify the number of components that explain at least 98% of the variance
+optimal_components = np.argmax(explained_variance >= 0.96) + 1
+print('Optimal Features required is',optimal_components)
+# Reduce the dataset using PCA with the optimal number of components
+pca = PCA(n_components=7)
+features_reduced = pca.fit_transform(features_scaled)
+
+# Add the target variable back to the reduced dataset
+reduced_data = pd.DataFrame(features_reduced, columns=[f'PC{i+1}' for i in range(7)])
+reduced_data['class'] = data['class']
+
+# Display the reduced dataset
+print('Reduced Dataset after PCA')
+
+# Proceed to classification model analysis
+reduced_data.head()
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score, roc_curve, confusion_matrix, classification_report, auc
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPClassifier
+
+# Split the reduced dataset into train and test sets
+X = reduced_data.drop('class', axis=1)
+y = reduced_data['class']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
+
+# Initialize the classifiers
+models = {
+    "Logistic Regression": LogisticRegression(random_state=42),
+    "Random Forest": RandomForestClassifier(random_state=42),
+    "SVM": SVC(probability=True, random_state=42),
+    "KNN": KNeighborsClassifier(),
+    "Naive Bayes": GaussianNB(),
+    "Neural Network": MLPClassifier(random_state=42, max_iter=500)
+}
+
+# Fit the models and evaluate
+results = {}
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else model.decision_function(X_test)
+    auc_score = roc_auc_score(y_test, y_proba)
+    results[name] = {
+        "model": model,
+        "auc": auc_score,
+        "confusion_matrix": confusion_matrix(y_test, y_pred),
+        "classification_report": classification_report(y_test, y_pred, output_dict=True),
+        "roc_curve": roc_curve(y_test, y_proba)
+    }
+
+# Plot ROC curves for all models
+plt.figure(figsize=(10, 8))
+for name, result in results.items():
+    fpr, tpr, _ = result["roc_curve"]
+    plt.plot(fpr, tpr, label=f"{name} (AUC = {result['auc']:.2f})")
+
+plt.plot([0, 1], [0, 1], 'k--', label="Random Guess")
+plt.title("ROC Curves for Classification Models")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.legend()
+plt.grid()
+plt.show()
+
+# Display AUC scores and confusion matrices
+results_summary = {name: {"AUC": result["auc"], "Confusion Matrix": result["confusion_matrix"]} for name, result in results.items()}
+results_summary
+from sklearn.metrics import ConfusionMatrixDisplay, classification_report, confusion_matrix
+
+# Display metrics and detailed confusion matrix for each algorithm
+for name, result in results.items():
+    # Retrieve predictions and confusion matrix
+    y_pred = result["model"].predict(X_test)
+    conf_matrix = confusion_matrix(y_test, y_pred)
+    
+    # Retrieve classification report
+    classification_rep = classification_report(y_test, y_pred, target_names=["Edible", "Not Edible"])
+    
+    # Print detailed metrics
+    print(f"Confusion Matrix for {name}:\n{conf_matrix}")
+    print(f"\nClassification Report for {name}:\n{classification_rep}")
+    
+    # Display confusion matrix
+    disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=["Edible", "Not Edible"])
+    disp.plot(cmap="Blues")
+    disp.ax_.set_title(f"Confusion Matrix - {name}")
+    plt.show()
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+
+# Initialize RandomForestClassifier
+rf = RandomForestClassifier(random_state=42, n_jobs=-1)
+
+# Define the parameter grid for hyperparameter tuning
+params = {
+    'max_depth': [2, 3, 5, 10, 20],
+    'min_samples_leaf': [5, 10, 20, 50, 100, 200],
+    'n_estimators': [10, 25, 30, 50, 100, 200]
+}
+
+# Instantiate the grid search model
+grid_search = GridSearchCV(estimator=rf,
+                           param_grid=params,
+                           cv=4,
+                           n_jobs=-1,
+                           verbose=1,
+                           scoring="accuracy")
+
+# Fit the grid search model
+grid_search.fit(X_train, y_train)
+
+# Get the best model from grid search
+best_rf = grid_search.best_estimator_
+print(f"Best Parameters: {grid_search.best_params_}")
+# Evaluate the tuned model
+y_proba_best = best_rf.predict_proba(X_test)[:, 1]
+
+# Threshold tuning
+thresholds = [0.3, 0.4, 0.5, 0.6, 0.7]
+results_threshold = {}
+
+for threshold in thresholds:
+    y_pred_threshold = (y_proba_best >= threshold).astype(int)
+    confusion = confusion_matrix(y_test, y_pred_threshold)
+    false_negatives = confusion[1][0]  # Non-edible misclassified as edible
+    auc_score = roc_auc_score(y_test, y_proba_best)
+    results_threshold[threshold] = {
+        "Confusion Matrix": confusion,
+        "False Negatives": false_negatives,
+        "AUC": auc_score
+    }
+
+# Display results for different thresholds
+print("Threshold Tuning Results", results_threshold)
+from sklearn.metrics import ConfusionMatrixDisplay, classification_report, confusion_matrix
+# Adjust the classification threshold to minimize false negatives
+thresholds = [0.3, 0.4, 0.5, 0.6, 0.7]
+results_threshold = {}
+
+for threshold in thresholds:
+    y_pred_threshold = (y_proba_best >= threshold).astype(int)
+    confusion = confusion_matrix(y_test, y_pred_threshold)
+    false_negatives = confusion[1][0]  # Non-edible misclassified as edible
+    auc_score = roc_auc_score(y_test, y_proba_best)
+    results_threshold[threshold] = {
+        "Confusion Matrix": confusion,
+        "False Negatives": false_negatives,
+        "AUC": auc_score
+    }
+
+# Display results for different thresholds
+print('Threshold Tuning Results', results_threshold)
+
+# Suggest the best threshold to minimize false negatives
+results_threshold
+# Finalize the model with the optimal threshold (0.3)
+final_threshold = 0.3
+y_pred_final = (y_proba_best >= final_threshold).astype(int)
+
+# Recalculate confusion matrix and metrics
+confusion_final = confusion_matrix(y_test, y_pred_final)
+roc_auc_final = roc_auc_score(y_test, y_proba_best)
+fpr_final, tpr_final, _ = roc_curve(y_test, y_proba_best)
+
+# Plot the updated confusion matrix
+plt.figure(figsize=(6, 6))
+disp = ConfusionMatrixDisplay(confusion_matrix=confusion_final, display_labels=["Edible", "Not Edible"])
+disp.plot(cmap="Blues")
+plt.title('Confusion Matrix - Final Model with Threshold 0.3')
+plt.show()
+
+# Plot the ROC curve for the final model
+plt.figure(figsize=(8, 6))
+plt.plot(fpr_final, tpr_final, label=f"Final Model (AUC = {roc_auc_final:.2f})")
+plt.plot([0, 1], [0, 1], 'k--', label="Random Guess")
+plt.title("ROC Curve - Final Model")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.legend()
+plt.grid()
+plt.show()
+
+ # Retrieve classification report
+classification_rep_final = classification_report(y_test, y_pred_final, target_names=["Edible", "Not Edible"])
+
+# Display final evaluation metrics
+ # Print detailed metrics
+print(f"Confusion Matrix for Random Forest with Thresold 0.3:\n{confusion_final}")
+print(f"\nClassification Report for Random Forest with Thresold 0.3:\n{classification_rep_final}")
+print(f"ROC_AUC for Random Forest with Thresold 0.3:\n{roc_auc_final}")
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV
+
+# Initialize RandomForestClassifier
+rf = RandomForestClassifier(random_state=42, n_jobs=-1)
+
+# Define the parameter grid for hyperparameter tuning
+params = {
+    'max_depth': [20],  # Best value from previous analysis
+    'min_samples_leaf': [1],  # Best value from previous analysis
+    'n_estimators': [200],  # Best value from previous analysis
+    'max_features': ['sqrt'],  # Identified optimal value
+    'bootstrap': [False]  # Identified optimal value
+}
+# Instantiate the grid search model
+grid_search = GridSearchCV(estimator=rf,
+                           param_grid=params,
+                           cv=4,
+                           n_jobs=-1,
+                           verbose=1,
+                           scoring="accuracy")
+
+# Fit the grid search model
+grid_search.fit(X_train, y_train)
+
+# Get the best model from grid search
+best_rf = grid_search.best_estimator_
+print(f"Best Parameters: {grid_search.best_params_}")
+
+# Evaluate the tuned model
+y_proba_best = best_rf.predict_proba(X_test)[:, 1]
+
+# Threshold tuning
+thresholds = [0.3, 0.4, 0.5, 0.6, 0.7]
+results_threshold = {}
+
+for threshold in thresholds:
+    y_pred_threshold = (y_proba_best >= threshold).astype(int)
+    confusion = confusion_matrix(y_test, y_pred_threshold)
+    false_negatives = confusion[1][0]  # Non-edible misclassified as edible
+    auc_score = roc_auc_score(y_test, y_proba_best)
+    results_threshold[threshold] = {
+        "Confusion Matrix": confusion,
+        "False Negatives": false_negatives,
+        "AUC": auc_score
+    }
+
+# Display results for different thresholds
+print("Threshold Tuning Results", results_threshold)
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Extract the confusion matrix for threshold k=0.3
+conf_matrix = results_threshold[0.3]["Confusion Matrix"]
+
+# Plot the confusion matrix
+plt.figure(figsize=(6, 5))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', cbar=False)
+plt.title("Confusion Matrix for improved Decision Tree (Threshold: 0.3)")
+plt.xlabel("Predicted Label")
+plt.ylabel("True Label")
+plt.show()
+# Import necessary libraries
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import silhouette_score, accuracy_score
+import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+# Assume reduced_data is already defined with 'class' column
+X = reduced_data.drop('class', axis=1)
+y = reduced_data['class']
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42, stratify=y)
+
+# Standardize the data
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# Elbow Method to find the optimal k
+inertia = []
+k_range = range(1, 21)  # Check k from 1 to 20
+
+for k in k_range:
+    model = KNeighborsClassifier(n_neighbors=k)
+    model.fit(X_train, y_train)
+    inertia.append(model.score(X_test, y_test))
+
+# Plot the Elbow Method graph
+plt.figure(figsize=(10, 6))
+plt.plot(k_range, inertia, marker='o')
+plt.xlabel('Number of Neighbors (k)')
+plt.ylabel('Model Accuracy')
+plt.title('Elbow Method for Optimal k')
+plt.show()
+
+# Choose the optimal k based on the plot
+optimal_k = 3  # Replace with the value identified from the plot
+
+# Fit KNN with the chosen k
+knn = KNeighborsClassifier(n_neighbors=optimal_k)
+knn.fit(X_train, y_train)
+
+# Predict on the test set
+y_pred = knn.predict(X_test)
+
+# Calculate and print the Silhouette Score
+silhouette_avg = silhouette_score(X_test, y_pred)
+print(f'Silhouette Score for k={optimal_k}: {silhouette_avg:.2f}')
+
+# Evaluate the model
+accuracy = accuracy_score(y_test, y_pred)
+print(f'Accuracy for k={optimal_k}: {accuracy:.2f}')
+
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+# Calculate the confusion matrix
+conf_matrix = confusion_matrix(y_test, y_pred)
+
+# Display the confusion matrix using matplotlib
+disp = ConfusionMatrixDisplay(confusion_matrix=conf_matrix, display_labels=knn.classes_)
+disp.plot(cmap='Blues')
+plt.title(f'Confusion Matrix for KNN (k={optimal_k})')
+plt.show()
+import time
+
+# Initialize a dictionary to store execution times
+execution_times = {}
+
+# Measure time taken for fitting each model
+for name, model in models.items():
+    start_time = time.time()  # Start timing
+    model.fit(X_train, y_train)
+    end_time = time.time()  # End timing
+    execution_times[name] = end_time - start_time  # Store execution time
+
+# Display execution times
+for name, exec_time in execution_times.items():
+    print(f"{name}: {exec_time:.4f} seconds")
